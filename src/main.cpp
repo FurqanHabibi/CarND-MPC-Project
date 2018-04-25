@@ -8,14 +8,10 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "MPC.h"
 #include "json.hpp"
+#include "helper_functions.h"
 
 // for convenience
 using json = nlohmann::json;
-
-// For converting back and forth between radians and degrees.
-constexpr double pi() { return M_PI; }
-double deg2rad(double x) { return x * pi() / 180; }
-double rad2deg(double x) { return x * 180 / pi(); }
 
 // Checks if the SocketIO event has JSON data.
 // If there is data the JSON object in string format will be returned,
@@ -30,39 +26,6 @@ string hasData(string s) {
     return s.substr(b1, b2 - b1 + 2);
   }
   return "";
-}
-
-// Evaluate a polynomial.
-double polyeval(Eigen::VectorXd coeffs, double x) {
-  double result = 0.0;
-  for (int i = 0; i < coeffs.size(); i++) {
-    result += coeffs[i] * pow(x, i);
-  }
-  return result;
-}
-
-// Fit a polynomial.
-// Adapted from
-// https://github.com/JuliaMath/Polynomials.jl/blob/master/src/Polynomials.jl#L676-L716
-Eigen::VectorXd polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals,
-                        int order) {
-  assert(xvals.size() == yvals.size());
-  assert(order >= 1 && order <= xvals.size() - 1);
-  Eigen::MatrixXd A(xvals.size(), order + 1);
-
-  for (int i = 0; i < xvals.size(); i++) {
-    A(i, 0) = 1.0;
-  }
-
-  for (int j = 0; j < xvals.size(); j++) {
-    for (int i = 0; i < order; i++) {
-      A(j, i + 1) = A(j, i) * xvals(j);
-    }
-  }
-
-  auto Q = A.householderQr();
-  auto result = Q.solve(yvals);
-  return result;
 }
 
 int main() {
@@ -92,14 +55,38 @@ int main() {
           double psi = j[1]["psi"];
           double v = j[1]["speed"];
 
+          // transform waypoints to car coordinate
+          vector<vector<double>> car_points = transform_map2car(psi, px, py, ptsx, ptsy);
+          vector<double> car_ptsx = car_points[0];
+          vector<double> car_ptsy = car_points[1];
+          
+          // Fit a polynomial to the above ptsx and ptsy coordinates
+          Eigen::VectorXd car_ptsx_vec = Eigen::VectorXd::Map(car_ptsx.data(), car_ptsx.size());
+          Eigen::VectorXd car_ptsy_vec = Eigen::VectorXd::Map(car_ptsy.data(), car_ptsy.size());
+          auto coeffs = polyfit(car_ptsx_vec, car_ptsy_vec, 3) ;
+
+          // Calculate the cross track error
+          // TODO!!!
+          double cte = calculate_cte(car_ptsx, car_ptsy);
+
+          // Calculate the orientation error
+          double epsi = atan(polyeval(polyderivative(coeffs), 0));
+
           /*
           * TODO: Calculate steering angle and throttle using MPC.
           *
           * Both are in between [-1, 1].
           *
           */
-          double steer_value;
-          double throttle_value;
+          Eigen::VectorXd state(6);
+          state << 0, 0, 0, v, cte, epsi;
+          vector<vector<double>> mpc_result = mpc.Solve(state, coeffs);
+          vector<double> mpc_solution = mpc_result[0];
+          vector<double> mpc_x = mpc_result[1];
+          vector<double> mpc_y = mpc_result[2];
+        
+          double steer_value = mpc_solution[6];
+          double throttle_value = mpc_solution[7];
 
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
@@ -108,8 +95,8 @@ int main() {
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
-          vector<double> mpc_x_vals;
-          vector<double> mpc_y_vals;
+          vector<double> mpc_x_vals = mpc_x;
+          vector<double> mpc_y_vals = mpc_y;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Green line
@@ -118,8 +105,8 @@ int main() {
           msgJson["mpc_y"] = mpc_y_vals;
 
           //Display the waypoints/reference line
-          vector<double> next_x_vals;
-          vector<double> next_y_vals;
+          vector<double> next_x_vals = car_ptsx;
+          vector<double> next_y_vals = car_ptsy;
 
           //.. add (x,y) points to list here, points are in reference to the vehicle's coordinate system
           // the points in the simulator are connected by a Yellow line
