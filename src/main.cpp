@@ -40,7 +40,7 @@ int main() {
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
     string sdata = string(data).substr(0, length);
-    cout << sdata << endl;
+    // cout << sdata << endl;
     if (sdata.size() > 2 && sdata[0] == '4' && sdata[1] == '2') {
       string s = hasData(sdata);
       if (s != "") {
@@ -60,14 +60,14 @@ int main() {
           vector<double> car_ptsx = car_points[0];
           vector<double> car_ptsy = car_points[1];
           
-          // Fit a polynomial to the above ptsx and ptsy coordinates
+          // Fit a polynomial to the above car coordinates
           Eigen::VectorXd car_ptsx_vec = Eigen::VectorXd::Map(car_ptsx.data(), car_ptsx.size());
           Eigen::VectorXd car_ptsy_vec = Eigen::VectorXd::Map(car_ptsy.data(), car_ptsy.size());
           auto coeffs = polyfit(car_ptsx_vec, car_ptsy_vec, 3) ;
 
           // Calculate the cross track error
           // TODO!!!
-          double cte = calculate_cte(car_ptsx, car_ptsy);
+          double cte = polyeval(coeffs, 0);
 
           // Calculate the orientation error
           double epsi = atan(polyeval(polyderivative(coeffs), 0));
@@ -91,7 +91,7 @@ int main() {
           json msgJson;
           // NOTE: Remember to divide by deg2rad(25) before you send the steering value back.
           // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
-          msgJson["steering_angle"] = steer_value;
+          msgJson["steering_angle"] = -steer_value / deg2rad(25);
           msgJson["throttle"] = throttle_value;
 
           //Display the MPC predicted trajectory 
@@ -116,7 +116,7 @@ int main() {
 
 
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
           // Latency
           // The purpose is to mimic real driving conditions where
           // the car does actuate the commands instantly.

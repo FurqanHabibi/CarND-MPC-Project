@@ -96,18 +96,27 @@ inline vector<vector<double>> transform_map2car(double car_theta, double car_x, 
   return result;
 }
 
-inline double calculate_cte(const vector<double> &ptsx, const vector<double> &ptsy) {
-  double a = ptsy[0] - ptsy[1];
-  double b = ptsx[1] - ptsx[0];
-  double c = (ptsx[0] - ptsx[1]) * ptsy[0] + (ptsy[1] - ptsy[0]) * ptsx[0];
+// inline double calculate_cte(const vector<double> &ptsx, const vector<double> &ptsy) {
+//   int prev_point = 0;
+//   for (int i = 0; i < ptsx.size(); ++i) {
+//     if (ptsx[i] <= 0) {
+//       prev_point = i;
+//     }
+//     else {
+//       break;
+//     }
+//   }
+//   double a = ptsy[prev_point + 1] - ptsy[prev_point];
+//   double b = ptsx[prev_point] - ptsx[prev_point + 1];
+//   double c = ptsy[prev_point] * ptsx[prev_point + 1] - ptsx[prev_point] * ptsy[prev_point + 1];
   
-  double cte = abs(c) / sqrt(a * a + b * b);
-  double y_intersect = -b * c / (a * a + b * b);
-  if (y_intersect < 0) {
-    cte *= -1;
-  }
+//   double cte = abs(c) / sqrt(a * a + b * b);
+//   double y_intersect = -b * c / (a * a + b * b);
+//   if (y_intersect < 0) {
+//     cte *= -1;
+//   }
 
-  return cte;
-}
+//   return cte;
+// }
 
 #endif /* HELPER_FUNCTIONS_H_ */

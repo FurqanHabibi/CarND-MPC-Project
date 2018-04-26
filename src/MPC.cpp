@@ -8,8 +8,8 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 25;
-double dt = 0.1;
+size_t N = 5;
+double dt = 0.01;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -24,7 +24,10 @@ double dt = 0.1;
 const double Lf = 2.67;
 
 // This is the reference velocity to pursue
-const double ref_v = 5;
+const double ref_v = 60;
+
+// The actuator delay
+const double act_delay = 0.1; // s
 
 // The solver takes all the state variables and actuator
 // variables in a singular vector. Thus, we should to establish
@@ -63,17 +66,21 @@ class FG_eval {
     for (int t = 0; t < N; t++) {
       fg[0] += CppAD::pow(vars[cte_start + t], 2);
       fg[0] += CppAD::pow(vars[epsi_start + t], 2);
-      fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
+      fg[0] += CppAD::pow(CppAD::abs(vars[v_start + t] - ref_v), 1.2);
     }
     // Minimize change-rate.
     for (int t = 0; t < N - 1; t++) {
       fg[0] += CppAD::pow(vars[delta_start + t], 2);
-      fg[0] += CppAD::pow(vars[a_start + t], 2);
+      // fg[0] += CppAD::pow(vars[a_start + t], 2);
     }
-    // // Minimize the value gap between sequential actuations.
-    // for (int t = 0; t < N - 2; t++) {
-    //   fg[0] += 500 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
-    //   fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+    // Minimize the value gap between sequential actuations.
+    for (int t = 0; t < N - 2; t++) {
+      fg[0] += 3000 * CppAD::pow(vars[delta_start + t + 1] - vars[delta_start + t], 2);
+      fg[0] += CppAD::pow(vars[a_start + t + 1] - vars[a_start + t], 2);
+    }
+    // // Avoid backward route
+    // for (int t = 0; t < N - 1; t++) {
+    //     fg[0] += CppAD::pow((vars[x_start + t + 1] - vars[x_start + t]) - CppAD::abs(vars[x_start + t + 1] - vars[x_start + t]), 2);
     // }
 
     //
@@ -111,8 +118,23 @@ class FG_eval {
       AD<double> delta0 = vars[delta_start + t - 1];
       AD<double> a0 = vars[a_start + t - 1];
 
-      //AD<double> f0 = coeffs[0] + coeffs[1] * x0;
+      AD<double> f0 = polyeval(coeffs, x0);
       AD<double> psides0 = CppAD::atan(polyeval(polyderivative(coeffs), x0));
+      
+      // to accomodate delay in actuation, use the model to predict the previous state after actuation delay
+      AD<double> pred_x0 = x0 + v0 * CppAD::cos(psi0) * act_delay;
+      AD<double> pred_y0 = y0 + v0 * CppAD::sin(psi0) * act_delay;
+      AD<double> pred_psi0 = psi0 + (v0 / Lf) * delta0 * act_delay;
+      AD<double> pred_v0 = v0 + a0 * act_delay;
+
+      AD<double> pred_delta0 = delta0;
+      AD<double> pred_a0 = a0;
+
+      AD<double> pred_f0 = polyeval(coeffs, pred_x0);
+      AD<double> pred_psides0 = CppAD::atan(polyeval(polyderivative(coeffs), pred_x0));
+
+      AD<double> pred_cte0 = pred_f0 - pred_y0;
+      AD<double> pred_epsi0 = pred_psi0 - pred_psides0;
 
       // Here's `x` to get you started.
       // The idea here is to constraint this value to be 0.
@@ -122,14 +144,14 @@ class FG_eval {
       // these to the solver.
 
       // TODO: Setup the rest of the model constraints
-      fg[1 + x_start + t] = x1 - (x0 + v0 * CppAD::cos(psi0) * dt);
-      fg[1 + y_start + t] = y1 - (y0 + v0 * CppAD::sin(psi0) * dt);
+      fg[1 + x_start + t] = x1 - (pred_x0 + pred_v0 * CppAD::cos(pred_psi0) * dt);
+      fg[1 + y_start + t] = y1 - (pred_y0 + pred_v0 * CppAD::sin(pred_psi0) * dt);
       // in unity, positive psi is right turn and vice versa
-      fg[1 + psi_start + t] = psi1 - (psi0 + (v0 / Lf) * delta0 * dt);
-      fg[1 + v_start + t] = v1 - (v0 + a0 * dt);
+      fg[1 + psi_start + t] = psi1 - (pred_psi0 + (pred_v0 / Lf) * pred_delta0 * dt);
+      fg[1 + v_start + t] = v1 - (pred_v0 + pred_a0 * dt);
       // no easy way to calculate cte, so just use the previous cte as is
-      fg[1 + cte_start + t] = cte1 - (cte0 + v0 * CppAD::sin(epsi0) * dt);
-      fg[1 + epsi_start + t] = epsi1 - ((psi0 - psides0) + (v0 / Lf) * delta0 * dt);
+      fg[1 + cte_start + t] = cte1 - ((pred_f0 - pred_y0) + pred_v0 * CppAD::sin(pred_epsi0) * dt);
+      fg[1 + epsi_start + t] = epsi1 - ((pred_psi0 - pred_psides0) + (pred_v0 / Lf) * pred_delta0 * dt);
     }
   }
 };
@@ -137,7 +159,9 @@ class FG_eval {
 //
 // MPC class definition implementation.
 //
-MPC::MPC() {}
+MPC::MPC() {
+  last_cost = -1;
+}
 MPC::~MPC() {}
 
 vector<vector<double>> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs) {
@@ -151,6 +175,14 @@ vector<vector<double>> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
   double v = state[3];
   double cte = state[4];
   double epsi = state[5];
+
+  // // to accomodate delay in actuation, use the model to predict the initial state right when the actuation starts
+  // double pred_x = x + v * cos(psi) * act_delay;
+  // double pred_y = y + v * sin(psi) * act_delay;
+  // double pred_psi = psi;
+  // double pred_v = v;
+  // double pred_cte = polyeval(coeffs, pred_x) - pred_y;
+  // double pred_epsi = pred_psi - atan(polyeval(polyderivative(coeffs), pred_x));
 
   // TODO: Set the number of model variables (includes both states and inputs).
   // For example: If the state is a 4 element vector, the actuators is a 2
@@ -190,8 +222,8 @@ vector<vector<double>> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
   // degrees (values in radians).
   // NOTE: Feel free to change this to something else.
   for (int i = delta_start; i < a_start; i++) {
-    vars_lowerbound[i] = -0.436332;
-    vars_upperbound[i] = 0.436332;
+    vars_lowerbound[i] = -deg2rad(25);
+    vars_upperbound[i] = deg2rad(25);
   }
 
   // Acceleration/decceleration upper and lower limits.
@@ -256,7 +288,7 @@ vector<vector<double>> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
 
   // Cost
   auto cost = solution.obj_value;
-  std::cout << "Cost " << cost << std::endl;
+  // std::cout << "Cost " << cost << std::endl;
 
   // TODO: Return the first actuator values. The variables can be accessed with
   // `solution.x[i]`.
@@ -271,12 +303,20 @@ vector<vector<double>> MPC::Solve(Eigen::VectorXd state, Eigen::VectorXd coeffs)
   // get the mpc horizon points
   vector<double> mpc_x;
   vector<double> mpc_y;
-  for (int i = 0; i < N; ++i) {
-    if (i % 5 == 0) {
-      mpc_x.push_back(solution.x[x_start + 1 + i]);
-      mpc_y.push_back(solution.x[y_start + 1 + i]);
-    }
+  for (int i = 0; i < N - 1; ++i) {
+    mpc_x.push_back(solution.x[x_start + i + 1]);
+    mpc_y.push_back(solution.x[y_start + i + 1]);
   }
+
+  // if ((last_cost != -1) && (abs(cost - last_cost) > 300)) {
+  //   std::cout << "x : ";
+  //   for (auto i: mpc_x) std::cout << i << ", ";
+  //   std::cout << endl;
+  //   std::cout << "y : ";
+  //   for (auto i: mpc_y) std::cout << i << ", ";
+  //   std::cout << endl;
+  // }
+  // last_cost = cost;
 
   return { mpc_solution, mpc_x, mpc_y };
 }
